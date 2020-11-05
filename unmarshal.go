@@ -36,9 +36,13 @@ func Unmarshal(r io.Reader) (ret interface{}, retErr error) {
 // Unmarshal2 data serialized by python, returning the unused portion.
 func Unmarshal2(input io.Reader) (ret interface{}, retErr error) {
 	code := make([]byte, 1)
-	_, err := input.Read(code)
+	n, err := input.Read(code)
 	if nil != err {
 		retErr = err
+	}
+	if retErr == io.EOF || n == 0 {
+		// no more data
+		return
 	}
 
 	ret, retErr = unmarshal(code[0], input)
