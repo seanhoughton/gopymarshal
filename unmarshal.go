@@ -28,24 +28,17 @@ var (
 )
 
 // Unmarshal data serialized by python
-func Unmarshal(r io.Reader) (ret interface{}, retErr error) {
-	ret, retErr = Unmarshal2(r)
-	return
-}
-
-// Unmarshal2 data serialized by python, returning the unused portion.
-func Unmarshal2(input io.Reader) (ret interface{}, retErr error) {
-	code := make([]byte, 1)
-	n, err := input.Read(code)
+func Unmarshal(input io.Reader) (ret interface{}, retErr error) {
+	code, err := readCode(input)
 	if nil != err {
 		retErr = err
 	}
-	if retErr == io.EOF || n == 0 {
+	if retErr == io.EOF {
 		// no more data
 		return
 	}
 
-	ret, retErr = unmarshal(code[0], input)
+	ret, retErr = unmarshal(code, input)
 	return
 }
 
@@ -91,7 +84,7 @@ func readInt32(buffer io.Reader) (ret int32, retErr error) {
 func readFloat64(input io.Reader) (ret float64, retErr error) {
 	retErr = ERR_PARSE
 	tmp := make([]byte, 8)
-	if num, err := input.Read(tmp); nil == err && 8 == num {
+	if num, err := io.ReadFull(input, tmp); nil == err && 8 == num {
 		bits := binary.LittleEndian.Uint64(tmp)
 		ret = math.Float64frombits(bits)
 		retErr = nil
@@ -111,7 +104,10 @@ func readString(input io.Reader) (ret string, retErr error) {
 
 	retErr = nil
 	buf := make([]byte, strLen)
-	input.Read(buf)
+	if _, err := io.ReadFull(input, buf); nil != err {
+		retErr = err
+		return
+	}
 	ret = string(buf)
 	return
 }
@@ -122,17 +118,17 @@ func readList(input io.Reader) (ret []interface{}, retErr error) {
 		return
 	}
 
-	code := []byte{0}
+	var code byte
 	var err error
 	var val interface{}
 	ret = make([]interface{}, int(listSize))
 	for idx := 0; idx < int(listSize); idx++ {
-		_, err = input.Read(code)
+		code, err = readCode(input)
 		if nil != err {
 			break
 		}
 
-		val, err = unmarshal(code[0], input)
+		val, err = unmarshal(code, input)
 		if nil != err {
 			retErr = err
 			break
@@ -144,33 +140,32 @@ func readList(input io.Reader) (ret []interface{}, retErr error) {
 }
 
 func readDict(input io.Reader) (ret map[interface{}]interface{}, retErr error) {
-	code := []byte{0}
-	var err error
 	var key interface{}
 	var val interface{}
 	ret = make(map[interface{}]interface{})
+
 	for {
-		_, err = input.Read(code)
+		code, err := readCode(input)
 		if nil != err {
 			break
 		}
 
-		if CODE_STOP == code[0] {
+		if CODE_STOP == code {
 			break
 		}
 
-		key, err = unmarshal(code[0], input)
+		key, err = unmarshal(code, input)
 		if nil != err {
 			retErr = err
 			break
 		}
 
-		_, err = input.Read(code)
+		code, err = readCode(input)
 		if nil != err {
 			break
 		}
 
-		val, err = unmarshal(code[0], input)
+		val, err = unmarshal(code, input)
 		if nil != err {
 			retErr = err
 			break
@@ -179,4 +174,12 @@ func readDict(input io.Reader) (ret map[interface{}]interface{}, retErr error) {
 	} //end of read loop
 
 	return
+}
+
+func readCode(input io.Reader) (byte, error) {
+	code := []byte{0}
+	if _, err := io.ReadFull(input, code); err != nil {
+		return 0, err
+	}
+	return code[0], nil
 }
